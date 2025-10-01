@@ -1,12 +1,13 @@
-#!/usr/bin/env python
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
-from SocketServer import ThreadingMixIn
+#!/usr/bin/python3
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+import socket
 import threading
 import sys
 import subprocess
-from urlparse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse
 import logging
 import os
+
 
 def locate(file):
     #Find the path for fping
@@ -15,24 +16,26 @@ def locate(file):
                 return os.path.join(path, file)
     return "{}".format(file)
 
+
 def ping(host, prot, interval, count, size, source):
     # Using source address?
     if source == '':
-        ping_command = '{} -{} -b {} -i 1 -p {} -q -c {} {}'.format(filepath, prot, size, interval, count, host)
+        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i", "1", "-p", f"{interval}", "-q", "-c", f"{count}", f"{host}"]
     else:
-        ping_command = '{} -{} -b {} -i 1 -p {} -q -c {} -S {} {}'.format(filepath, prot, size, interval, count, source, host)
+        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i", "1", "-p", f"{interval}", "-q", "-c", f"{count}", "-S", f"{source}", f"{host}"]
 
     output = []
     #Log the actual ping command for debug purpose
-    logger.info(ping_command)
+    logger.info(' '.join(ping_command))
     #Execute the ping
-    cmd_output = subprocess.Popen(ping_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True).communicate()
+    cmd_output = subprocess.Popen(ping_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
     #Parse the fping output
     try:
-        loss = cmd_output[1].split("%")[1].split("/")[2]
-        min = cmd_output[1].split("=")[2].split("/")[0]
-        avg = cmd_output[1].split("=")[2].split("/")[1]
-        max = cmd_output[1].split("=")[2].split("/")[2].split("\n")[0]
+        stdout = cmd_output[1].decode('utf8')
+        loss = stdout.split("%")[1].split("/")[2]
+        min = stdout.split("=")[2].split("/")[0]
+        avg = stdout.split("=")[2].split("/")[1]
+        max = stdout.split("=")[2].split("/")[2].split("\n")[0]
     except IndexError:
         loss = 100
         min = 0
@@ -46,8 +49,9 @@ def ping(host, prot, interval, count, size, source):
     output.append('')
     return output
 
-class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """Handle requests in a separate thread."""
+class HTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET
+
 
 class GetHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -86,8 +90,9 @@ class GetHandler(BaseHTTPRequestHandler):
         #Prepare HTTP status code
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(message)
+        self.wfile.write(message.encode('utf8'))
         return
+
 
 if __name__ == '__main__':
     #Locate the path of fping
@@ -105,5 +110,6 @@ if __name__ == '__main__':
     else:
         port = 8085
     logger.info('Starting server port {}, use <Ctrl-C> to stop'.format(port))
-    server = ThreadedHTTPServer(('0.0.0.0', port), GetHandler)
+    server = HTTPServer(('', port), GetHandler)
     server.serve_forever()
+
