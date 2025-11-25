@@ -10,26 +10,29 @@ import os
 
 
 def locate(file):
-    #Find the path for fping
+    # Find the path for fping
     for path in os.environ["PATH"].split(os.pathsep):
         if os.path.exists(os.path.join(path, file)):
-                return os.path.join(path, file)
+            return os.path.join(path, file)
     return "{}".format(file)
 
 
 def ping(host, prot, interval, count, size, source):
     # Using source address?
     if source == '':
-        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i", "1", "-p", f"{interval}", "-q", "-c", f"{count}", f"{host}"]
+        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i",
+                        "1", "-p", f"{interval}", "-q", "-c", f"{count}", f"{host}"]
     else:
-        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i", "1", "-p", f"{interval}", "-q", "-c", f"{count}", "-S", f"{source}", f"{host}"]
+        ping_command = [filepath, f"-{prot}", "-b", f"{size}", "-i", "1", "-p", f"{
+            interval}", "-q", "-c", f"{count}", "-S", f"{source}", f"{host}"]
 
     output = []
-    #Log the actual ping command for debug purpose
+    # Log the actual ping command for debug purpose
     logger.info(' '.join(ping_command))
-    #Execute the ping
-    cmd_output = subprocess.Popen(ping_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
-    #Parse the fping output
+    # Execute the ping
+    cmd_output = subprocess.Popen(
+        ping_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE).communicate()
+    # Parse the fping output
     try:
         stdout = cmd_output[1].decode('utf8')
         loss = stdout.split("%")[1].split("/")[2]
@@ -41,7 +44,7 @@ def ping(host, prot, interval, count, size, source):
         min = 0
         avg = 0
         max = 0
-    #Prepare the metric
+    # Prepare the metric
     output.append("ping_avg {}".format(avg))
     output.append("ping_max {}".format(max))
     output.append("ping_min {}".format(min))
@@ -49,62 +52,81 @@ def ping(host, prot, interval, count, size, source):
     output.append('')
     return output
 
+
 class HTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET
 
 
 class GetHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        #Parse the url
-        parsed_path = urlparse(self.path).query
-        value = parse_qs(parsed_path)
-        #Retrieve the ping target
-        address = value['target'][0]
-        #Retrieve source address
-        if "source" in value:
-            source = value['source'][0]
-        else:
-            source = ''
-        #Retrieve prot
-        if "prot" in value:
-            prot = value['prot'][0]
-        else:
-            prot = 4
-        #Retrieve ping count
-        if "count" in value:
-            count = value['count'][0]
-        else:
-            count = 10
-        #Retrieve ping packet size
-        if "size" in value and int(value['size'][0]) < 10240:
-            size = value['size'][0]
-        else:
-            size = 56
-        #Retrieve ping interval
-        if "interval" in value and int(value['interval'][0]) > 1:
-            interval = value['interval'][0]
-        else:
-            interval = 500
+        try:
+            # Parse the url
+            parsed_path = urlparse(self.path).query
+            value = parse_qs(parsed_path)
+            # Retrieve the ping target
+            address = value['target'][0]
+            # Retrieve source address
+            if "source" in value:
+                source = value['source'][0]
+            else:
+                source = ''
+            # Retrieve prot
+            if "prot" in value:
+                prot = value['prot'][0]
+            else:
+                prot = 4
+            # Retrieve ping count
+            if "count" in value:
+                count = value['count'][0]
+            else:
+                count = 10
+            # Retrieve ping packet size
+            if "size" in value and int(value['size'][0]) < 10240:
+                size = value['size'][0]
+            else:
+                size = 56
+            # Retrieve ping interval
+            if "interval" in value and int(value['interval'][0]) > 1:
+                interval = value['interval'][0]
+            else:
+                interval = 500
 
-        message = '\n'.join(ping(address, prot, interval, count, size, source))
-        #Prepare HTTP status code
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(message.encode('utf8'))
+            message = '\n'.join(
+                ping(address, prot, interval, count, size, source))
+            # Prepare HTTP status code
+            self.send_response(200)
+            # FIXED: Add proper Content-Type header for Prometheus
+            self.send_header(
+                'Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(message.encode('utf8'))
+        except KeyError:
+            # Handle missing required parameters
+            self.send_response(400)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'Error: target parameter is required')
+        except Exception as e:
+            logger.error(f"Error handling request: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'Internal server error')
         return
 
 
 if __name__ == '__main__':
-    #Locate the path of fping
+    # Locate the path of fping
     global filepath
     filepath = locate("fping")
     logger = logging.getLogger()
     handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
-    #Check if there is a special port configured
+    # Check if there is a special port configured
     if len(sys.argv) >= 3:
         port = int(sys.argv[2])
     else:
@@ -112,4 +134,3 @@ if __name__ == '__main__':
     logger.info('Starting server port {}, use <Ctrl-C> to stop'.format(port))
     server = HTTPServer(('', port), GetHandler)
     server.serve_forever()
-
